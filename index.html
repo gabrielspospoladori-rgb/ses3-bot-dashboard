@@ -2077,6 +2077,7 @@ async function fetchLatest(preservedSnap) {
 
   try {
     const latest = await _pubDecryptLatest();
+    _contatosSincronizarManualDoServidor(latest);
     const data = normalizeData(latestToRelatorio(latest));
     globalData = data;
     renderDashboard(data);
@@ -4813,8 +4814,61 @@ function _contatosLer() {
   try { return JSON.parse(localStorage.getItem(_CT_KEY) || '[]'); }
   catch (_) { return []; }
 }
+
+// Marca de quando este navegador sincronizou pela ultima vez com a copia
+// compartilhada (dados/contatos_manual.json no bot) — evita que um fetch
+// logo depois de salvar sobrescreva a propria edicao antes do bot processar.
+const _CT_MANUAL_SYNCED_KEY = 'contatos_manual_synced_at_v1';
+
 function _contatosSalvarLista(lista) {
   localStorage.setItem(_CT_KEY, JSON.stringify(lista));
+  const agora = new Date().toISOString();
+  localStorage.setItem(_CT_MANUAL_SYNCED_KEY, agora);
+  // Envia pro bot local gravar em dados/contatos_manual.json (fire-and-forget).
+  // Só funciona na mesma máquina onde o bot roda — no link público (GitHub
+  // Pages) essa chamada falha silenciosamente, o que é esperado: editar
+  // contatos só persiste de verdade a partir da máquina do bot; qualquer
+  // outro dispositivo só consegue VER a lista (ela chega via publicação).
+  fetch('http://localhost:8080/api/contatos-manual', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ contatos: lista }),
+    signal: AbortSignal.timeout(4000),
+  }).catch(() => {});
+}
+
+// Traz a lista de contatos manuais direto do bot local (mesma máquina) —
+// usado pelo dashboard LOCAL, em paralelo ao _contatosSincronizarBot()
+// (que traz só os contatos auto-descobertos).
+async function _contatosSincronizarManualBot() {
+  try {
+    const resp = await fetch('http://localhost:8080/api/contatos-manual', { signal: AbortSignal.timeout(4000) });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    _mergeContatosManualDoServidor(data.contatos, data.atualizado);
+  } catch (_) { /* bot offline — silencioso */ }
+}
+
+// Traz a lista de contatos manuais que já veio junto do payload decriptado
+// (usado pela página PÚBLICA — GitHub Pages — que não tem acesso a localhost).
+function _contatosSincronizarManualDoServidor(latest) {
+  if (!latest || !Array.isArray(latest.contatos_manual)) return;
+  _mergeContatosManualDoServidor(latest.contatos_manual, latest.contatos_manual_atualizado);
+}
+
+// Lógica compartilhada: só adota a lista do servidor se ela for mais nova
+// que a última vez que ESTE navegador sincronizou (evita sobrescrever uma
+// edição feita há poucos segundos, antes do bot ter processado o POST).
+function _mergeContatosManualDoServidor(listaServidor, tsServidor) {
+  try {
+    if (!Array.isArray(listaServidor)) return;
+    const tsLocal = localStorage.getItem(_CT_MANUAL_SYNCED_KEY) || '';
+    if ((tsServidor && tsServidor > tsLocal) || (!tsLocal && listaServidor.length)) {
+      localStorage.setItem(_CT_KEY, JSON.stringify(listaServidor));
+      localStorage.setItem(_CT_MANUAL_SYNCED_KEY, tsServidor || new Date().toISOString());
+      if (typeof activeTab !== 'undefined' && activeTab === 'contatos') renderContatosTab();
+    }
+  } catch (_) { /* localStorage indisponível — ignora */ }
 }
 
 // ═══════════════════════════════════════════════════════════
