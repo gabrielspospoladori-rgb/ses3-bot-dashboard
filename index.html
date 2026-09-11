@@ -4820,6 +4820,29 @@ function _contatosLer() {
 // logo depois de salvar sobrescreva a propria edicao antes do bot processar.
 const _CT_MANUAL_SYNCED_KEY = 'contatos_manual_synced_at_v1';
 
+// Toast simples só pra avisar quando a sincronização com o bot falha —
+// antes isso falhava 100% em silêncio (fetch().catch(()=>{})) e dava a
+// falsa impressão de que o contato tinha sido salvo pra todo mundo, quando
+// na verdade só ficou no localStorage deste navegador.
+function _ctToast(msg, ok) {
+  try {
+    let el = document.getElementById('_ctSyncToast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = '_ctSyncToast';
+      el.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:99999;padding:10px 14px;'
+        + 'border-radius:6px;font-size:13px;font-weight:600;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);'
+        + 'transition:opacity .3s;max-width:340px;line-height:1.4';
+      document.body.appendChild(el);
+    }
+    el.style.background = ok ? '#16a34a' : '#dc2626';
+    el.textContent = msg;
+    el.style.opacity = '1';
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.style.opacity = '0'; }, 6000);
+  } catch (_) { /* ambiente sem DOM pronto ainda — ignora */ }
+}
+
 function _contatosSalvarLista(lista) {
   localStorage.setItem(_CT_KEY, JSON.stringify(lista));
   const agora = new Date().toISOString();
@@ -4829,12 +4852,27 @@ function _contatosSalvarLista(lista) {
   // Pages) essa chamada falha silenciosamente, o que é esperado: editar
   // contatos só persiste de verdade a partir da máquina do bot; qualquer
   // outro dispositivo só consegue VER a lista (ela chega via publicação).
-  fetch('http://localhost:8080/api/contatos-manual', {
+  const opts = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ contatos: lista }),
-    signal: AbortSignal.timeout(4000),
-  }).catch(() => {});
+  };
+  try { opts.signal = AbortSignal.timeout(4000); }
+  catch (_) { /* navegador antigo sem AbortSignal.timeout — segue sem timeout */ }
+
+  fetch('http://localhost:8080/api/contatos-manual', opts)
+    .then(async (resp) => {
+      let data = null;
+      try { data = await resp.json(); } catch (_) { /* resposta sem corpo JSON valido */ }
+      if (!resp.ok || !data || data.ok === false) {
+        console.warn('[contatos-manual] bot recusou salvar:', resp.status, data);
+        _ctToast('⚠️ Contato salvo só neste navegador — o bot recusou o envio (veja o Console, F12)', false);
+      }
+    })
+    .catch((e) => {
+      console.warn('[contatos-manual] falha ao enviar pro bot:', e);
+      _ctToast('⚠️ Contato salvo só neste navegador — não sincronizou com o bot (ele está rodando em localhost:8080?)', false);
+    });
 }
 
 // Traz a lista de contatos manuais direto do bot local (mesma máquina) —
