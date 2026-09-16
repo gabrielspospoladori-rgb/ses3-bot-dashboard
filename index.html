@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bot 2.0 — Monitor de Expedições e Performance Automatizado — SVC SES3 Linhares</title>
@@ -3354,10 +3357,24 @@ function _ffTipoNormalizado(tipo) {
 }
 function _ffFrotaFixo(v) {
   const tipo = _ffTipoNormalizado(v.tipo);
-  // VUC LM é frota fixa; os demais VUC permanecem como veículos de apoio.
-  const vucApoio = /^VUC\b/.test(tipo) && !/^VUC LM\b/.test(tipo);
-  return !(/^HR\b/.test(tipo) || vucApoio ||
-           tipo.includes('VEICULO DE PASSEIO') || tipo.includes('UTILITARIO'));
+  // Lista oficial de TIPOs de Frota Fixa (fonte: FROTAS_FIXAS em monitor_rotas.py).
+  // Antes esta função excluía por palavra-chave (qualquer "UTILITARIO" ou VUC que não
+  // fosse "VUC LM") e isso derrubava tipos que SÃO frota fixa oficial: "Rental Utilitário
+  // sem Ajudante", "Utilitário TKS 2025", "Vuc Vamos 2025" e "Vuc Vamos 2025 H2".
+  // Trocado para lista de inclusão, batendo com os 12 tipos válidos combinados.
+  const tiposValidos = [
+    'RENTAL UTILITARIO SEM AJUDANTE',
+    'VAN ELETRICA JV',
+    'FROTA FIXA LARGE VAN FORD',
+    'VAN VAMOS 2025',
+    'VUC VAMOS 2025',
+    'VAN TKS 2025',
+    'UTILITARIO TKS 2025',
+    'VAN VAMOS 2026',
+    'VAN FROTA FIXA',
+    'VUC LM 2026'
+  ];
+  return tiposValidos.some(t => tipo.includes(t));
 }
 function setFfSubFilter(campo, valor) {
   window._ffSubFilters[campo] = valor;
