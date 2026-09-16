@@ -3349,10 +3349,6 @@ function buildFrotasFixasTabHTML() {
                 <th style="padding:10px;text-align:left;border-bottom:1px solid var(--border)">Status</th>
                 <th style="padding:10px;text-align:left;border-bottom:1px solid var(--border)">Rota</th>
                 <th style="padding:10px;text-align:left;border-bottom:1px solid var(--border)">Motorista</th>
-                <th style="padding:10px;text-align:right;border-bottom:1px solid var(--border)">Entregues</th>
-                <th style="padding:10px;text-align:right;border-bottom:1px solid var(--border)">Falhas</th>
-                <th style="padding:10px;text-align:right;border-bottom:1px solid var(--border)">Pendentes</th>
-                <th style="padding:10px;text-align:left;border-bottom:1px solid var(--border)">ORH</th>
               </tr>
             </thead>
             <tbody id="ff-tbody"></tbody>
@@ -3508,12 +3504,8 @@ function renderFrotasFixasTab(data) {
       <td style="padding:8px 10px;border-bottom:1px solid var(--border)">${statusBadge}</td>
       <td style="padding:8px 10px;border-bottom:1px solid var(--border)">${v.rota||dash}</td>
       <td style="padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text2)">${v.motorista||dash}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--green)">${v.entregues>0?v.entregues:dash}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--red)">${v.falhas>0?v.falhas:dash}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:right;color:var(--yellow)">${v.pendentes>0?v.pendentes:dash}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-family:monospace">${v.orh||dash}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="10" style="padding:24px;text-align:center;color:var(--text3)">Sem veículos cadastrados</td></tr>';
+  }).join('') || '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">Sem veículos cadastrados</td></tr>';
 
   // Status do override
   const elStatus = document.getElementById('ff-cfg-status');
