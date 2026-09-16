@@ -3322,6 +3322,20 @@ function buildFrotasFixasTabHTML() {
       <button onclick="copiarRelatorioFrotaFixa(this)" style="margin-left:auto;background:#16a34a;color:#fff;border:none;cursor:pointer;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700">📋 Copiar relatório</button>
     </div>
 
+    <div class="section" style="margin-bottom:14px">
+      <div class="section-header"><div class="section-title">🔄 Cruzamento com o VEC (fleet-moviles) do dia</div></div>
+      <div class="section-body">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <label style="background:var(--blue);color:#fff;border:none;cursor:pointer;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700">
+            📤 Escolher CSV do VEC de hoje
+            <input type="file" accept=".csv,text/csv" onchange="abrirCruzamentoVec(this)" style="display:none">
+          </label>
+          <span id="vec-cruz-status" style="font-size:12px;color:var(--text3)">Exporte o VEC (fleet-moviles) do dia como CSV e escolha o arquivo aqui — cruza automaticamente com a Frota Fixa (Coluna "Último motivo da mudança de estado") e classifica MANUTENÇÃO / ATIVA / OCIOSA.</span>
+        </div>
+        <div id="vec-cruz-resultado"></div>
+      </div>
+    </div>
+
     <div class="section">
       <div class="section-header"><div class="section-title">🚛 Veículos da Frota Fixa</div></div>
       <div class="section-body" style="padding:0">
@@ -3547,6 +3561,236 @@ function copiarRelatorioFrotaFixa(botao) {
     `🟡 Ociosas: ${String(ociosas.length).padStart(2,'0')} frotas (${normais.length ? (ociosas.length/normais.length*100).toFixed(1) : '0.0'}% da frota disponível)`,
     `🔴 Em Manutenção: ${String(manutencao.length).padStart(2,'0')} frotas (${normais.length ? (manutencao.length/normais.length*100).toFixed(1) : '0.0'}% da frota total)`,
     detalhes ? '\n' + detalhes : ''
+  ].join('\n');
+  const copiar = navigator.clipboard?.writeText
+    ? navigator.clipboard.writeText(texto)
+    : new Promise((resolve, reject) => {
+        const area = document.createElement('textarea');
+        area.value = texto;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy') ? resolve() : reject(new Error('copy failed'));
+        area.remove();
+      });
+  copiar.then(() => {
+    const original = botao?.innerHTML;
+    if (botao) {
+      botao.textContent = '✓ Relatório copiado';
+      setTimeout(() => { botao.innerHTML = original; }, 1800);
+    }
+  }).catch(() => alert('Não foi possível copiar o relatório.'));
+}
+
+// ============ Cruzamento com o VEC (fleet-moviles) do dia ============
+// Tudo roda no navegador — o CSV nunca sai da máquina do usuário, não há upload
+// para nenhum servidor. Todo texto vindo do arquivo é escapado antes de ir pro
+// DOM (via _escapeHtml) para evitar XSS a partir de um CSV malicioso/corrompido.
+function _escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+function _normTxtVec(s) {
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().trim();
+}
+
+// Parser CSV genérico (respeita aspas com vírgula/aspas duplicada dentro do campo).
+function _parseCsvTexto(texto) {
+  const linhas = [];
+  let campo = '', linha = [], dentroAspas = false;
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto[i], prox = texto[i + 1];
+    if (dentroAspas) {
+      if (c === '"' && prox === '"') { campo += '"'; i++; }
+      else if (c === '"') { dentroAspas = false; }
+      else { campo += c; }
+    } else if (c === '"') { dentroAspas = true; }
+    else if (c === ',') { linha.push(campo); campo = ''; }
+    else if (c === '\r') { /* ignora */ }
+    else if (c === '\n') { linha.push(campo); linhas.push(linha); linha = []; campo = ''; }
+    else { campo += c; }
+  }
+  if (campo.length || linha.length) { linha.push(campo); linhas.push(linha); }
+  return linhas.filter(l => !(l.length === 1 && l[0] === ''));
+}
+
+// Classifica pelo texto de Estado / Último motivo da mudança de estado (VEC).
+function _vecClassificar(estado, motivo) {
+  const t = _normTxtVec(estado) || _normTxtVec(motivo);
+  if (t.includes('MANUTEN')) return 'MANUTENCAO';
+  if (t.includes('INATIVA')) return 'OCIOSA'; // ex.: "RESERVA INATIVA"
+  if (t.includes('OCIOS')) return 'OCIOSA';
+  return 'ATIVA';
+}
+
+function abrirCruzamentoVec(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('vec-cruz-status');
+  if (statusEl) statusEl.textContent = '⏳ Lendo ' + file.name + '...';
+  if (!/\.csv$/i.test(file.name)) {
+    if (statusEl) statusEl.textContent = '❌ Envie o CSV do VEC (exporte o fleet-moviles como CSV antes de escolher aqui).';
+    input.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      _processarCruzamentoVec(String(e.target.result || ''), file.name);
+    } catch (err) {
+      if (statusEl) statusEl.textContent = '❌ Erro ao processar o VEC: ' + err.message;
+    }
+  };
+  reader.onerror = () => { if (statusEl) statusEl.textContent = '❌ Não foi possível ler o arquivo.'; };
+  reader.readAsText(file, 'utf-8');
+  input.value = ''; // permite escolher o mesmo arquivo de novo depois
+}
+
+function _processarCruzamentoVec(texto, nomeArquivo) {
+  const linhas = _parseCsvTexto(texto);
+  if (!linhas.length) throw new Error('arquivo vazio');
+  const header = linhas[0].map(h => _normTxtVec(h));
+  const idx = (...nomes) => {
+    for (const n of nomes) {
+      const i = header.indexOf(_normTxtVec(n));
+      if (i !== -1) return i;
+    }
+    return -1;
+  };
+  const colPlaca  = idx('Placa');
+  const colEstado = idx('Estado');
+  const colMotivo = idx('Último motivo da mudança de estado', 'Ultimo motivo da mudanca de estado');
+  const colVR     = idx('Veículo Reserva', 'Veiculo Reserva');
+  if (colPlaca === -1) throw new Error('coluna "Placa" não encontrada — confirme que exportou o VEC (fleet-moviles) completo');
+
+  const porPlaca = new Map();
+  for (let i = 1; i < linhas.length; i++) {
+    const l = linhas[i];
+    const placa = _normTxtVec(l[colPlaca]);
+    if (!placa) continue;
+    porPlaca.set(placa, {
+      estado: colEstado !== -1 ? (l[colEstado] || '') : '',
+      motivo: colMotivo !== -1 ? (l[colMotivo] || '') : '',
+      veiculoReservaRaw: colVR !== -1 ? (l[colVR] || '') : ''
+    });
+  }
+
+  const raw = window._rawDados || {};
+  const veiculos = ((raw.frotas_fixas || {}).veiculos) || [];
+  if (!veiculos.length) throw new Error('lista de Frota Fixa ainda não carregada nesta aba');
+
+  const placasReservaOficiais = new Set(veiculos.filter(v => v.reserva).map(v => _normTxtVec(v.placa)));
+  const manutencao = [], ociosas = [], naoEncontradas = [];
+  let totalAtivas = 0;
+
+  veiculos.filter(v => !v.reserva).forEach(v => {
+    const info = porPlaca.get(_normTxtVec(v.placa));
+    if (!info) { naoEncontradas.push(v.placa); return; }
+    const classe = _vecClassificar(info.estado, info.motivo);
+    const reservaCobrindo = (info.veiculoReservaRaw || '').split(' - ')[0].trim();
+    if (classe === 'MANUTENCAO') manutencao.push({ placa: v.placa, transportadora: v.transportadora, reservaCobrindo });
+    else if (classe === 'OCIOSA') ociosas.push({ placa: v.placa, transportadora: v.transportadora });
+    else totalAtivas++;
+  });
+
+  const reservasExtras = [];
+  manutencao.forEach(item => {
+    if (item.reservaCobrindo && !placasReservaOficiais.has(_normTxtVec(item.reservaCobrindo))) {
+      reservasExtras.push({ cobre: item.placa, reserva: item.reservaCobrindo });
+    }
+  });
+
+  window._vecCruzamento = {
+    arquivo: nomeArquivo, geradoEm: new Date(),
+    manutencao, ociosas, totalAtivas, naoEncontradas, reservasExtras,
+    totalFrota: manutencao.length + ociosas.length + totalAtivas
+  };
+  _renderCruzamentoVec();
+}
+
+function _renderCruzamentoVec() {
+  const c = window._vecCruzamento;
+  const box = document.getElementById('vec-cruz-resultado');
+  const statusEl = document.getElementById('vec-cruz-status');
+  if (!c || !box) return;
+  const denom = c.totalAtivas + c.ociosas.length;
+  const pct = denom ? (c.totalAtivas / denom * 100).toFixed(1) : '0.0';
+  if (statusEl) {
+    statusEl.textContent = `✅ ${c.arquivo} cruzado às ${c.geradoEm.toLocaleTimeString('pt-BR')} — ${c.totalFrota} placa(s) classificada(s).`;
+  }
+  const porTransportadora = lista => {
+    const grupos = {};
+    lista.forEach(v => (grupos[v.transportadora || 'SEM TRANSPORTADORA'] ||= []).push(v));
+    return Object.entries(grupos).sort(([a], [b]) => a.localeCompare(b));
+  };
+  const blocoManut = porTransportadora(c.manutencao).map(([t, itens]) => `
+    <div style="margin-top:6px"><b>${_escapeHtml(t)} (${itens.length}):</b><br>` +
+    itens.map(v => `${_escapeHtml(String(v.placa).toLowerCase())}` +
+      (v.reservaCobrindo
+        ? ` → reserva: <b>${_escapeHtml(String(v.reservaCobrindo).toLowerCase())}</b>`
+        : ` <span style="color:var(--text3)">— sem reserva vinculada no VEC</span>`)
+    ).join('<br>') + '</div>').join('');
+  const blocoOciosas = porTransportadora(c.ociosas).map(([t, itens]) => `
+    <div style="margin-top:6px"><b>${_escapeHtml(t)} (${itens.length}):</b> ` +
+    itens.map(v => _escapeHtml(String(v.placa).toLowerCase())).join(', ') + '</div>').join('');
+  const avisos = [];
+  if (c.naoEncontradas.length) avisos.push(
+    `⚠️ ${c.naoEncontradas.length} placa(s) da Frota Fixa não apareceram neste VEC: ` +
+    c.naoEncontradas.map(p => _escapeHtml(String(p).toLowerCase())).join(', '));
+  if (c.reservasExtras.length) avisos.push(
+    `⚠️ Reserva(s) cobrindo frota fixa mas fora do cadastro oficial: ` +
+    c.reservasExtras.map(r => `${_escapeHtml(String(r.reserva).toLowerCase())} (cobre ${_escapeHtml(String(r.cobre).toLowerCase())})`).join(', '));
+  box.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:10px 0">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:11px;color:var(--text3)">🟢 ATIVA (VEC)</div><div style="font-size:22px;font-weight:800">${c.totalAtivas}</div></div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:11px;color:var(--text3)">🟡 OCIOSA (VEC)</div><div style="font-size:22px;font-weight:800">${c.ociosas.length}</div></div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:11px;color:var(--text3)">🔴 MANUTENÇÃO (VEC)</div><div style="font-size:22px;font-weight:800">${c.manutencao.length}</div></div>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:8px">Utilização (Ativa ÷ (Ativa + Ociosa)): <b>${pct}%</b></div>
+    ${blocoManut ? '<div style="font-size:12px"><b>🔴 Em manutenção:</b>' + blocoManut + '</div>' : ''}
+    ${blocoOciosas ? '<div style="font-size:12px;margin-top:8px"><b>🟡 Ociosas:</b>' + blocoOciosas + '</div>' : ''}
+    ${avisos.length ? '<div style="font-size:11px;color:#f59e0b;margin-top:10px">' + avisos.join('<br>') + '</div>' : ''}
+    <button onclick="copiarRelatorioVec(this)" style="margin-top:10px;background:#16a34a;color:#fff;border:none;cursor:pointer;border-radius:7px;padding:6px 14px;font-size:12px;font-weight:700">📋 Copiar relatório VEC</button>
+  `;
+}
+
+function copiarRelatorioVec(botao) {
+  const c = window._vecCruzamento;
+  if (!c) { alert('Cruze um VEC primeiro.'); return; }
+  const denom = c.totalAtivas + c.ociosas.length;
+  const pct = denom ? (c.totalAtivas / denom * 100).toFixed(1) : '0.0';
+  const dataFmt = c.geradoEm.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' }).toUpperCase();
+  const porTransportadora = (lista, titulo, emoji) => {
+    const grupos = {};
+    lista.forEach(v => (grupos[v.transportadora || 'SEM TRANSPORTADORA'] ||= []).push(v));
+    return Object.entries(grupos).sort(([a], [b]) => a.localeCompare(b)).map(([t, itens]) =>
+      `${t}\n${emoji} ${titulo} ${t} (${String(itens.length).padStart(2, '0')}):\n` +
+      itens.map(v => `${String(v.placa).toLowerCase()}${v.reservaCobrindo ? ' - reserva: ' + String(v.reservaCobrindo).toLowerCase() : ''}`).join('\n')
+    ).join('\n\n');
+  };
+  const detalhes = [
+    porTransportadora(c.manutencao, 'Em manutenção', '🔴'),
+    porTransportadora(c.ociosas, 'Ociosos', '🟡')
+  ].filter(Boolean).join('\n\n');
+  const texto = [
+    `RELATÓRIO EXECUTIVO - UTILIZAÇÃO DE FROTA FIXA — cruzado com VEC (${dataFmt})`,
+    `Fonte: ${c.arquivo}`,
+    `Utilização: ${pct}% ${Number(pct) >= 90 ? '✅' : '⚠️'}`,
+    '',
+    'VISÃO GERAL',
+    `Frota Total: ${c.totalFrota} veículos`,
+    '',
+    `🟢 Em Operação (Ativa): ${c.totalAtivas} frotas (${denom ? pct : '0.0'}% da frota disponível)`,
+    `🟡 Ociosas: ${String(c.ociosas.length).padStart(2, '0')} frotas`,
+    `🔴 Em Manutenção: ${String(c.manutencao.length).padStart(2, '0')} frotas`,
+    detalhes ? '\n' + detalhes : '',
+    c.naoEncontradas.length ? `\n⚠️ Não encontradas no VEC: ${c.naoEncontradas.join(', ').toLowerCase()}` : ''
   ].join('\n');
   const copiar = navigator.clipboard?.writeText
     ? navigator.clipboard.writeText(texto)
