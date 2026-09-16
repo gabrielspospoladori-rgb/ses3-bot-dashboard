@@ -3356,6 +3356,10 @@ function _ffTipoNormalizado(tipo) {
   return String(tipo || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
 }
 function _ffFrotaFixo(v) {
+  // Toda reserva já é, por definição, Frota Fixa (é a lista oficial FROTAS_FIXAS
+  // em monitor_rotas.py) — inclusive as 2 reservas tipo "HR", que não têm um dos
+  // 12 tipos operacionais mas ainda são frota fixa de backup. Não filtra por tipo.
+  if (v.reserva === true) return true;
   const tipo = _ffTipoNormalizado(v.tipo);
   // Lista oficial de TIPOs de Frota Fixa (fonte: FROTAS_FIXAS em monitor_rotas.py).
   // Antes esta função excluía por palavra-chave (qualquer "UTILITARIO" ou VUC que não
