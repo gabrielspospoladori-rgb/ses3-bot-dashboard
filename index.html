@@ -2104,8 +2104,8 @@ async function fetchLatest(preservedSnap) {
 }
 
 // ─── Alarme sonoro de hora em hora ──────────────────────────────
-// A frase "Hora do reporte, hora a hora" falada em voz alta (Web Speech
-// API), repetida até fechar ~20s — sem toque/beep, só a fala.
+// Toque de sino (Web Audio API) e, na sequência, a frase "Hora do reporte,
+// hora a hora" falada em voz alta (Web Speech API), ~5s no total.
 // Continua funcionando com a aba em segundo plano/minimizada, desde que a
 // aba fique aberta e o computador não entre em suspensão. Por política de
 // autoplay do navegador, áudio só toca depois de 1 clique do usuário na
@@ -2114,18 +2114,35 @@ let _alarmeHoraInterval = null;
 let _alarmeAudioCtx = null;
 const _ALARME_FRASE = 'Hora do reporte, hora a hora.';
 
+function _tocarSinoAlarme() {
+  if (!_alarmeAudioCtx) _alarmeAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (_alarmeAudioCtx.state === 'suspended') _alarmeAudioCtx.resume();
+  const ctx = _alarmeAudioCtx;
+  const inicio = ctx.currentTime + 0.05;
+  // Sino: tom puro com decaimento exponencial (bate uma vez, como um sino).
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = 1000;
+  osc.connect(gain); gain.connect(ctx.destination);
+  gain.gain.setValueAtTime(0.5, inicio);
+  gain.gain.exponentialRampToValueAtTime(0.0001, inicio + 0.9);
+  osc.start(inicio); osc.stop(inicio + 0.9);
+}
+
 function _tocarBeepAlarme() {
   try {
-    // Frase falada, ~5s no total.
+    _tocarSinoAlarme(); // sino antes de falar
+    // Frase falada, depois do sino, ~5s no total.
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel(); // limpa fila de falas antigas acumuladas
-      for (let i = 0; i < 1; i++) {
+      setTimeout(() => {
         const fala = new SpeechSynthesisUtterance(_ALARME_FRASE);
         fala.lang = 'pt-BR';
         fala.rate = 0.95;
         fala.volume = 1;
         window.speechSynthesis.speak(fala);
-      }
+      }, 950); // espera o sino terminar antes de falar
     }
   } catch (e) { console.warn('Alarme: não foi possível tocar o alarme', e); }
 }
