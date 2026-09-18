@@ -2103,11 +2103,72 @@ async function fetchLatest(preservedSnap) {
   _refreshTimer = setTimeout(fetchLatest, 30000);
 }
 
+// ─── Alarme sonoro de hora em hora ──────────────────────────────
+// Toca 3 beeps curtos via Web Audio API (sem depender de arquivo externo).
+// Continua tocando com a aba em segundo plano/minimizada, desde que a aba
+// fique aberta e o computador não entre em suspensão. Por política de
+// autoplay do navegador, áudio só toca depois de 1 clique do usuário na
+// página — o próprio botão de ativar já conta como esse clique.
+let _alarmeHoraInterval = null;
+let _alarmeAudioCtx = null;
+
+function _tocarBeepAlarme() {
+  try {
+    if (!_alarmeAudioCtx) _alarmeAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_alarmeAudioCtx.state === 'suspended') _alarmeAudioCtx.resume();
+    const tocarTom = (delayMs) => setTimeout(() => {
+      const osc = _alarmeAudioCtx.createOscillator();
+      const gain = _alarmeAudioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, _alarmeAudioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.3, _alarmeAudioCtx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, _alarmeAudioCtx.currentTime + 0.35);
+      osc.connect(gain); gain.connect(_alarmeAudioCtx.destination);
+      osc.start(); osc.stop(_alarmeAudioCtx.currentTime + 0.4);
+    }, delayMs);
+    tocarTom(0); tocarTom(450); tocarTom(900); // 3 beeps, mais fácil de notar
+  } catch (e) { console.warn('Alarme: não foi possível tocar o beep', e); }
+}
+
+function toggleAlarmeHora(botao) {
+  const ativo = !!_alarmeHoraInterval;
+  if (ativo) {
+    clearInterval(_alarmeHoraInterval);
+    _alarmeHoraInterval = null;
+    try { localStorage.setItem('ff_alarme_hora_ativo', '0'); } catch(e) {}
+    if (botao) { botao.textContent = '🔔 Alarme 1h: desligado'; botao.style.background = 'var(--bg3)'; botao.style.color = 'var(--text)'; }
+  } else {
+    if (!_alarmeAudioCtx) _alarmeAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    _alarmeAudioCtx.resume().catch(()=>{});
+    _tocarBeepAlarme(); // beep de teste imediato, confirma que o som está ok
+    _alarmeHoraInterval = setInterval(_tocarBeepAlarme, 3600000); // 1h
+    try { localStorage.setItem('ff_alarme_hora_ativo', '1'); } catch(e) {}
+    if (botao) { botao.textContent = '🔕 Alarme 1h: ligado'; botao.style.background = 'var(--blue)'; botao.style.color = '#fff'; }
+  }
+}
+
 // Carrega imediatamente ao abrir
 document.addEventListener('DOMContentLoaded', () => {
   // Inicializa UI do toggle SES2/SES3 antes de carregar dados
   try { _updateStationToggleUI(); } catch(e){}
   fetchLatest();
+
+  // Restaura o alarme se estava ligado antes de recarregar a página.
+  try {
+    if (localStorage.getItem('ff_alarme_hora_ativo') === '1') {
+      const btn = document.getElementById('btn-alarme-hora');
+      if (btn) { btn.textContent = '🔕 Alarme 1h: ligado'; btn.style.background = 'var(--blue)'; btn.style.color = '#fff'; }
+      _alarmeHoraInterval = setInterval(_tocarBeepAlarme, 3600000);
+      // Áudio só é liberado após 1 clique do usuário nesta nova carga da página.
+      const desbloquearAudio = () => {
+        if (!_alarmeAudioCtx) _alarmeAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        _alarmeAudioCtx.resume().catch(()=>{});
+        document.removeEventListener('click', desbloquearAudio);
+      };
+      document.addEventListener('click', desbloquearAudio);
+    }
+  } catch(e) {}
 });
 // Fallback: também dispara sem DOMContentLoaded
 if (document.readyState !== 'loading') fetchLatest();
