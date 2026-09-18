@@ -2116,10 +2116,10 @@ const _ALARME_FRASE = 'Hora do reporte, hora a hora.';
 
 function _tocarBeepAlarme() {
   try {
-    // Frase falada, repetida até completar ~20s no total.
+    // Frase falada, repetida até completar ~5s no total.
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel(); // limpa fila de falas antigas acumuladas
-      for (let i = 0; i < 7; i++) {
+      for (let i = 0; i < 2; i++) {
         const fala = new SpeechSynthesisUtterance(_ALARME_FRASE);
         fala.lang = 'pt-BR';
         fala.rate = 0.95;
